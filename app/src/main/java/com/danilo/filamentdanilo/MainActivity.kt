@@ -1,7 +1,6 @@
 package com.danilo.filamentdanilo
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.os.Bundle
 import android.util.Log
 import android.view.Choreographer
@@ -9,8 +8,19 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.WindowManager
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.filament.Fence
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.Material
@@ -36,7 +46,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
 
     companion object {
         // Load the library for the utility layer, which in turn loads gltfio and the Filament core.
@@ -51,7 +61,6 @@ class MainActivity : Activity() {
     private lateinit var choreographer: Choreographer
     private val frameScheduler = FrameCallback()
     private lateinit var modelViewer: ModelViewer
-    private lateinit var titlebarHint: TextView
     private val doubleTapListener = DoubleTapListener()
     private val singleTapListener = SingleTapListener()
     private lateinit var doubleTapDetector: GestureDetector
@@ -64,16 +73,58 @@ class MainActivity : Activity() {
     private var loadStartTime = 0L
     private var loadStartFence: Fence? = null
     private val viewerContent = AutomationEngine.ViewerContent()
+    private val titleState = mutableStateOf("")
+
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        initXmlUi()
+        remoteServer = RemoteServer(8082)
+        setContent {
+            HomeScreen()
+        }
+    }
+
+    private fun initXmlUi() {
         setContentView(R.layout.simple_layout)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        titlebarHint = findViewById(R.id.user_hint)
         surfaceView = findViewById(R.id.main_sv)
         choreographer = Choreographer.getInstance()
+
+        modelViewer = ModelViewer(surfaceView)
+
+        createDefaultRenderables()
+        createIndirectLight()
+    }
+
+    @Composable
+    fun HomeScreen(){
+        val title by titleState
+        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, color = Color.Black)
+            FilamentSurfaceComposeView()
+        }
+    }
+
+    @Composable
+    fun FilamentSurfaceComposeView() {
+        // Adds view to Compose
+        AndroidView(
+            modifier = Modifier.fillMaxSize(), // Occupy the max size in the Compose UI tree
+            factory = { context ->
+                SurfaceView(context).apply {
+                    initSurfaceView(this)
+                }
+            },
+            update = { _ ->
+                // no-op
+            }
+        )
+    }
+
+    private fun initSurfaceView(surfaceView: SurfaceView){
 
         doubleTapDetector = GestureDetector(applicationContext, doubleTapListener)
         singleTapDetector = GestureDetector(applicationContext, singleTapListener)
@@ -131,8 +182,6 @@ class MainActivity : Activity() {
         view.bloomOptions = view.bloomOptions.apply {
             enabled = true
         }
-
-        remoteServer = RemoteServer(8082)
     }
 
     private fun createDefaultRenderables() {
@@ -349,7 +398,7 @@ class MainActivity : Activity() {
     fun loadModelData(message: RemoteServer.ReceivedMessage) {
         Log.i(TAG, "Downloaded model ${message.label} (${message.buffer.capacity()} bytes)")
         clearStatusText()
-        titlebarHint.text = message.label
+        titleState.value = message.label
         CoroutineScope(Dispatchers.IO).launch {
             when {
                 message.label.endsWith(".zip") -> loadZip(message)
