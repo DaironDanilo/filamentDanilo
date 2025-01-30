@@ -11,13 +11,17 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +40,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import com.google.android.filament.Fence
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.Material
@@ -72,12 +78,7 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "gltf-viewer"
     }
 
-    private lateinit var surfaceView: SurfaceView
-    private lateinit var choreographer: Choreographer
-    private val frameScheduler = FrameCallback()
     private lateinit var modelViewer: ModelViewer
-    private val doubleTapListener = DoubleTapListener()
-    private val singleTapListener = SingleTapListener()
     private lateinit var doubleTapDetector: GestureDetector
     private lateinit var singleTapDetector: GestureDetector
     private var remoteServer: RemoteServer? = null
@@ -94,30 +95,20 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        initXmlUi()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        enableEdgeToEdge()
         remoteServer = RemoteServer(8082)
         setContent {
             HomeScreen()
         }
     }
 
-    private fun initXmlUi() {
-        setContentView(R.layout.simple_layout)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        surfaceView = findViewById(R.id.main_sv)
-        choreographer = Choreographer.getInstance()
-
-        modelViewer = ModelViewer(surfaceView)
-
-        createDefaultRenderables()
-        createIndirectLight()
-    }
-
     @Composable
     fun HomeScreen() {
         val title by titleState
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.navigationBars)) {
             FilamentSurfaceComposeView()
             Column(Modifier.align(Alignment.TopCenter)) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -139,8 +130,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             var sliderPosition by remember { mutableFloatStateOf(0f) }
-            modelViewer.cameraFocalLength = sliderPosition
-            updateRootTransform()
+//             TODO("update this to use slider later")
+//            modelViewer.cameraFocalLength = sliderPosition
+//            updateRootTransform()
             Column(modifier = Modifier.align(Alignment.BottomCenter)) {
                 ElevatedCard(
                     elevation = CardDefaults.cardElevation(
@@ -189,11 +181,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun initSurfaceView(surfaceView: SurfaceView) {
+        modelViewer = ModelViewer(surfaceView)
+        val choreographer = Choreographer.getInstance()
+        val frameScheduler = FrameCallback(choreographer)
+        val doubleTapListener = DoubleTapListener()
+        val singleTapListener =
+            SingleTapListener(modelViewer = modelViewer, surfaceView = surfaceView)
 
         doubleTapDetector = GestureDetector(applicationContext, doubleTapListener)
         singleTapDetector = GestureDetector(applicationContext, singleTapListener)
 
-        modelViewer = ModelViewer(surfaceView)
         viewerContent.view = modelViewer.view
         viewerContent.sunlight = modelViewer.light
         viewerContent.lightManager = modelViewer.engine.lightManager
@@ -213,6 +210,7 @@ class MainActivity : ComponentActivity() {
         setStatusText("To load a new model, go to the above URL on your host machine.")
 
         val view = modelViewer.view
+        lifecycle.addObserver(MyLifecycleTracker(choreographer, frameScheduler, remoteServer))
 
         /*
          * Note: The settings below are overriden when connecting to the remote UI.
@@ -438,22 +436,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        choreographer.postFrameCallback(frameScheduler)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        choreographer.removeFrameCallback(frameScheduler)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        choreographer.removeFrameCallback(frameScheduler)
-        remoteServer?.close()
-    }
-
     override fun onBackPressed() {
         super.onBackPressed()
         finish()
@@ -491,7 +473,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    inner class FrameCallback : Choreographer.FrameCallback {
+    inner class FrameCallback(private val choreographer: Choreographer) :
+        Choreographer.FrameCallback {
         private val startTime = System.nanoTime()
         override fun doFrame(frameTimeNanos: Long) {
             choreographer.postFrameCallback(this)
@@ -581,7 +564,10 @@ class MainActivity : ComponentActivity() {
     }
 
     // Just for testing purposes
-    inner class SingleTapListener : GestureDetector.SimpleOnGestureListener() {
+    inner class SingleTapListener(
+        private val modelViewer: ModelViewer,
+        private val surfaceView: SurfaceView
+    ) : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(event: MotionEvent): Boolean {
             modelViewer.view.pick(
                 event.x.toInt(),
@@ -593,6 +579,28 @@ class MainActivity : ComponentActivity() {
                 },
             )
             return super.onSingleTapUp(event)
+        }
+    }
+
+    class MyLifecycleTracker(
+        private val choreographer: Choreographer,
+        private val frameScheduler: FrameCallback,
+        private val remoteServer: RemoteServer?
+    ) : DefaultLifecycleObserver {
+        override fun onResume(owner: LifecycleOwner) {
+            super.onResume(owner)
+            choreographer.postFrameCallback(frameScheduler)
+        }
+
+        override fun onPause(owner: LifecycleOwner) {
+            super.onPause(owner)
+            choreographer.removeFrameCallback(frameScheduler)
+        }
+
+        override fun onDestroy(owner: LifecycleOwner) {
+            super.onDestroy(owner)
+            choreographer.removeFrameCallback(frameScheduler)
+            remoteServer?.close()
         }
     }
 }
