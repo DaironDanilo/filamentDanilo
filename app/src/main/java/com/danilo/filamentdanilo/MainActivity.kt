@@ -40,8 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.google.android.filament.Fence
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.Material
@@ -98,18 +97,34 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         remoteServer = RemoteServer(8082)
+        val choreographer = Choreographer.getInstance()
+        val frameScheduler = FrameCallback(choreographer)
         setContent {
-            HomeScreen()
+            HomeScreen(
+                choreographer,
+                frameScheduler,
+                remoteServer
+            )
         }
     }
 
     @Composable
-    fun HomeScreen() {
+    fun HomeScreen(
+        choreographer: Choreographer,
+        frameScheduler: Choreographer.FrameCallback,
+        remoteServer: RemoteServer?
+    ) {
         val title by titleState
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.navigationBars)) {
-            FilamentSurfaceComposeView()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+        ) {
+            FilamentSurfaceComposeView(
+                choreographer,
+                frameScheduler,
+                remoteServer
+            )
             Column(Modifier.align(Alignment.TopCenter)) {
                 Spacer(modifier = Modifier.height(16.dp))
                 if (title.isNotEmpty()) {
@@ -165,7 +180,11 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun FilamentSurfaceComposeView() {
+    fun FilamentSurfaceComposeView(
+        choreographer: Choreographer,
+        frameScheduler: Choreographer.FrameCallback,
+        remoteServer: RemoteServer?
+    ) {
         // Adds view to Compose
         AndroidView(
             modifier = Modifier.fillMaxSize(), // Occupy the max size in the Compose UI tree
@@ -178,12 +197,21 @@ class MainActivity : ComponentActivity() {
                 // no-op
             }
         )
+        LifecycleResumeEffect(Unit) {
+            // Equivalent to onResume()
+            choreographer.postFrameCallback(frameScheduler)
+            onPauseOrDispose {
+                // Equivalent to onPause() and onDestroy()
+                choreographer.removeFrameCallback(frameScheduler)
+                remoteServer?.close()
+            }
+        }
     }
 
-    private fun initSurfaceView(surfaceView: SurfaceView) {
+    private fun initSurfaceView(
+        surfaceView: SurfaceView,
+    ) {
         modelViewer = ModelViewer(surfaceView)
-        val choreographer = Choreographer.getInstance()
-        val frameScheduler = FrameCallback(choreographer)
         val doubleTapListener = DoubleTapListener()
         val singleTapListener =
             SingleTapListener(modelViewer = modelViewer, surfaceView = surfaceView)
@@ -210,8 +238,6 @@ class MainActivity : ComponentActivity() {
         setStatusText("To load a new model, go to the above URL on your host machine.")
 
         val view = modelViewer.view
-        lifecycle.addObserver(MyLifecycleTracker(choreographer, frameScheduler, remoteServer))
-
         /*
          * Note: The settings below are overriden when connecting to the remote UI.
          */
@@ -579,28 +605,6 @@ class MainActivity : ComponentActivity() {
                 },
             )
             return super.onSingleTapUp(event)
-        }
-    }
-
-    class MyLifecycleTracker(
-        private val choreographer: Choreographer,
-        private val frameScheduler: FrameCallback,
-        private val remoteServer: RemoteServer?
-    ) : DefaultLifecycleObserver {
-        override fun onResume(owner: LifecycleOwner) {
-            super.onResume(owner)
-            choreographer.postFrameCallback(frameScheduler)
-        }
-
-        override fun onPause(owner: LifecycleOwner) {
-            super.onPause(owner)
-            choreographer.removeFrameCallback(frameScheduler)
-        }
-
-        override fun onDestroy(owner: LifecycleOwner) {
-            super.onDestroy(owner)
-            choreographer.removeFrameCallback(frameScheduler)
-            remoteServer?.close()
         }
     }
 }
