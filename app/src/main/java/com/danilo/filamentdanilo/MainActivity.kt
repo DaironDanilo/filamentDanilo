@@ -29,6 +29,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -40,7 +41,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.android.filament.Fence
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.Material
@@ -183,7 +187,8 @@ class MainActivity : ComponentActivity() {
     fun FilamentSurfaceComposeView(
         choreographer: Choreographer,
         frameScheduler: Choreographer.FrameCallback,
-        remoteServer: RemoteServer?
+        remoteServer: RemoteServer?,
+        lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current,
     ) {
         // Adds view to Compose
         AndroidView(
@@ -197,13 +202,34 @@ class MainActivity : ComponentActivity() {
                 // no-op
             }
         )
-        LifecycleResumeEffect(Unit) {
-            // Equivalent to onResume()
-            choreographer.postFrameCallback(frameScheduler)
-            onPauseOrDispose {
-                // Equivalent to onPause() and onDestroy()
-                choreographer.removeFrameCallback(frameScheduler)
-                remoteServer?.close()
+
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> {
+                        choreographer.postFrameCallback(frameScheduler)
+                    }
+
+                    Lifecycle.Event.ON_PAUSE -> {
+                        choreographer.removeFrameCallback(frameScheduler)
+                    }
+
+                    Lifecycle.Event.ON_DESTROY -> {
+                        remoteServer?.close()
+                    }
+
+                    else -> {
+                        // no-op
+                    }
+                }
+            }
+
+            // Add the observer to the lifecycle
+            lifecycleOwner.lifecycle.addObserver(observer)
+
+            // When the effect leaves the Composition, remove the observer
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
             }
         }
     }
