@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -38,8 +39,9 @@ fun HomeScreen() {
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
         FilamentSurfaceComposeView(titleState)
-        Column(Modifier.align(Alignment.TopCenter)) {
-            Spacer(modifier = Modifier.height(16.dp))
+        Column(Modifier
+            .align(Alignment.TopCenter)
+            .windowInsetsPadding(WindowInsets.statusBars)) {
             if (titleState.value.isNotEmpty()) {
                 ElevatedCard(
                     elevation = CardDefaults.cardElevation(
