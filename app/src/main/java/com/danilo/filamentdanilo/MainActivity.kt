@@ -29,7 +29,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,16 +41,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.android.filament.Fence
 import com.google.android.filament.IndirectLight
 import com.google.android.filament.Material
 import com.google.android.filament.Skybox
 import com.google.android.filament.View
 import com.google.android.filament.utils.AutomationEngine
+import com.google.android.filament.utils.AutomationEngine.ViewerContent
 import com.google.android.filament.utils.HDRLoader
 import com.google.android.filament.utils.IBLPrefilterContext
 import com.google.android.filament.utils.KTX1Loader
@@ -81,57 +80,28 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "gltf-viewer"
     }
 
-    private lateinit var modelViewer: ModelViewer
-    private lateinit var doubleTapDetector: GestureDetector
-    private lateinit var singleTapDetector: GestureDetector
-    private var remoteServer: RemoteServer? = null
-    private var statusToast: Toast? = null
-    private var statusText: String? = null
-    private var latestDownload: String? = null
-    private val automation = AutomationEngine()
-    private var loadStartTime = 0L
-    private var loadStartFence: Fence? = null
-    private val viewerContent = AutomationEngine.ViewerContent()
-    private val titleState = mutableStateOf("")
-
-
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
-        remoteServer = RemoteServer(8082)
-        val choreographer = Choreographer.getInstance()
-        val frameScheduler = FrameCallback(choreographer)
         setContent {
-            HomeScreen(
-                choreographer,
-                frameScheduler,
-                remoteServer
-            )
+            HomeScreen()
         }
     }
 
     @Composable
-    fun HomeScreen(
-        choreographer: Choreographer,
-        frameScheduler: Choreographer.FrameCallback,
-        remoteServer: RemoteServer?
-    ) {
-        val title by titleState
+    fun HomeScreen() {
+        val titleState = remember { mutableStateOf("https://google.github.io/filament/remote") }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
-            FilamentSurfaceComposeView(
-                choreographer,
-                frameScheduler,
-                remoteServer
-            )
+            FilamentSurfaceComposeView(titleState)
             Column(Modifier.align(Alignment.TopCenter)) {
                 Spacer(modifier = Modifier.height(16.dp))
-                if (title.isNotEmpty()) {
+                if (titleState.value.isNotEmpty()) {
                     ElevatedCard(
                         elevation = CardDefaults.cardElevation(
                             defaultElevation = 6.dp
@@ -140,7 +110,7 @@ class MainActivity : ComponentActivity() {
                             .height(48.dp)
                     ) {
                         Text(
-                            title,
+                            titleState.value,
                             color = Color.Black,
                             fontSize = 24.sp,
                             modifier = Modifier.padding(8.dp)
@@ -184,66 +154,55 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun FilamentSurfaceComposeView(
-        choreographer: Choreographer,
-        frameScheduler: Choreographer.FrameCallback,
-        remoteServer: RemoteServer?,
-        lifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current,
-    ) {
+    fun FilamentSurfaceComposeView(titleState: MutableState<String>) {
         // Adds view to Compose
         AndroidView(
             modifier = Modifier.fillMaxSize(), // Occupy the max size in the Compose UI tree
             factory = { context ->
                 SurfaceView(context).apply {
-                    initSurfaceView(this)
+                    initSurfaceView(this, titleState)
                 }
             },
             update = { _ ->
                 // no-op
             }
         )
-
-        DisposableEffect(lifecycleOwner) {
-            val observer = LifecycleEventObserver { _, event ->
-                when (event) {
-                    Lifecycle.Event.ON_RESUME -> {
-                        choreographer.postFrameCallback(frameScheduler)
-                    }
-
-                    Lifecycle.Event.ON_PAUSE -> {
-                        choreographer.removeFrameCallback(frameScheduler)
-                    }
-
-                    Lifecycle.Event.ON_DESTROY -> {
-                        remoteServer?.close()
-                    }
-
-                    else -> {
-                        // no-op
-                    }
-                }
-            }
-
-            // Add the observer to the lifecycle
-            lifecycleOwner.lifecycle.addObserver(observer)
-
-            // When the effect leaves the Composition, remove the observer
-            onDispose {
-                lifecycleOwner.lifecycle.removeObserver(observer)
-            }
-        }
     }
 
     private fun initSurfaceView(
         surfaceView: SurfaceView,
+        titleState: MutableState<String>,
     ) {
-        modelViewer = ModelViewer(surfaceView)
-        val doubleTapListener = DoubleTapListener()
+        val loadStartTime = 0L
+        val statusToast = mutableStateOf<Toast?>(null)
+        val statusText = mutableStateOf<String?>(null)
+        val remoteServer = RemoteServer(8082)
+        val choreographer = Choreographer.getInstance()
+        val modelViewer = ModelViewer(surfaceView)
+        val viewerContent = ViewerContent()
+        val automation = AutomationEngine()
+        setStatusText(
+            text = "To load a new model, go to the above URL on your host machine.",
+            statusToast = statusToast,
+            statusText = statusText,
+        )
+        val frameScheduler = FrameCallback(
+            choreographer = choreographer,
+            modelViewer = modelViewer,
+            automation = automation,
+            viewerContent = viewerContent,
+            remoteServer = remoteServer,
+            loadStartTime = loadStartTime,
+            statusToast = statusToast,
+            statusText = statusText,
+            titleState = titleState,
+        )
+        val doubleTapListener = DoubleTapListener(modelViewer, automation)
         val singleTapListener =
             SingleTapListener(modelViewer = modelViewer, surfaceView = surfaceView)
 
-        doubleTapDetector = GestureDetector(applicationContext, doubleTapListener)
-        singleTapDetector = GestureDetector(applicationContext, singleTapListener)
+        val doubleTapDetector = GestureDetector(applicationContext, doubleTapListener)
+        val singleTapDetector = GestureDetector(applicationContext, singleTapListener)
 
         viewerContent.view = modelViewer.view
         viewerContent.sunlight = modelViewer.light
@@ -258,12 +217,11 @@ class MainActivity : ComponentActivity() {
             true
         }
 
-        createDefaultRenderables()
-        createIndirectLight()
-
-        setStatusText("To load a new model, go to the above URL on your host machine.")
+        createDefaultRenderables(modelViewer, automation)
+        createIndirectLight(modelViewer, viewerContent)
 
         val view = modelViewer.view
+        lifecycle.addObserver(MyLifecycleTracker(choreographer, frameScheduler, remoteServer))
         /*
          * Note: The settings below are overriden when connecting to the remote UI.
          */
@@ -298,7 +256,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun createDefaultRenderables() {
+    private fun createDefaultRenderables(modelViewer: ModelViewer, automation: AutomationEngine) {
         val buffer = assets.open("models/scene.gltf").use { input ->
             val bytes = ByteArray(input.available())
             input.read(bytes)
@@ -306,10 +264,10 @@ class MainActivity : ComponentActivity() {
         }
 
         modelViewer.loadModelGltfAsync(buffer) { uri -> readCompressedAsset("models/$uri") }
-        updateRootTransform()
+        updateRootTransform(modelViewer, automation)
     }
 
-    private fun createIndirectLight() {
+    private fun createIndirectLight(modelViewer: ModelViewer, viewerContent: ViewerContent) {
         val engine = modelViewer.engine
         val scene = modelViewer.scene
         val ibl = "envs/default_env"
@@ -330,42 +288,50 @@ class MainActivity : ComponentActivity() {
         return ByteBuffer.wrap(bytes)
     }
 
-    private fun clearStatusText() {
-        statusToast?.let {
-            it.cancel()
-            statusText = null
-        }
-    }
-
-    private fun setStatusText(text: String) {
+    private fun setStatusText(
+        text: String,
+        statusToast: MutableState<Toast?>,
+        statusText: MutableState<String?>,
+    ) {
         runOnUiThread {
-            if (statusToast == null || statusText != text) {
-                statusText = text
-                statusToast = Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT)
-                statusToast!!.show()
-
+            if (statusToast.value == null || statusText.value != text) {
+                statusText.value = text
+                statusToast.value = Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT)
+                statusToast.value?.show()
             }
         }
     }
 
-    private suspend fun loadGlb(message: RemoteServer.ReceivedMessage) {
+    private suspend fun loadGlb(
+        message: RemoteServer.ReceivedMessage,
+        modelViewer: ModelViewer,
+        automation: AutomationEngine,
+        onLoadStartFenceChange: (Fence) -> Unit,
+        onLoadStartTimeChange: (Long) -> Unit,
+    ) {
         withContext(Dispatchers.Main) {
             modelViewer.destroyModel()
             modelViewer.loadModelGlb(message.buffer)
-            updateRootTransform()
-            loadStartTime = System.nanoTime()
-            loadStartFence = modelViewer.engine.createFence()
+            updateRootTransform(modelViewer, automation)
+            onLoadStartTimeChange(System.nanoTime())
+            onLoadStartFenceChange(modelViewer.engine.createFence())
         }
     }
 
-    private suspend fun loadHdr(message: RemoteServer.ReceivedMessage) {
+    private suspend fun loadHdr(
+        message: RemoteServer.ReceivedMessage,
+        modelViewer: ModelViewer,
+        viewerContent: ViewerContent,
+        statusToast: MutableState<Toast?>,
+        statusText: MutableState<String?>,
+    ) {
         withContext(Dispatchers.Main) {
             val engine = modelViewer.engine
             val equirect = HDRLoader.createTexture(engine, message.buffer)
             if (equirect == null) {
-                setStatusText("Could not decode HDR file.")
+                setStatusText("Could not decode HDR file.", statusToast, statusText)
             } else {
-                setStatusText("Successfully decoded HDR file.")
+                setStatusText("Successfully decoded HDR file.", statusToast, statusText)
 
                 val context = IBLPrefilterContext(engine)
                 val equirectToCubemap = IBLPrefilterContext.EquirectangularToCubemap(context)
@@ -398,7 +364,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun loadZip(message: RemoteServer.ReceivedMessage) {
+    private suspend fun loadZip(
+        message: RemoteServer.ReceivedMessage,
+        modelViewer: ModelViewer,
+        automation: AutomationEngine,
+        statusToast: MutableState<Toast?>,
+        statusText: MutableState<String?>,
+        onLoadStartFenceChange: (Fence) -> Unit,
+        onLoadStartTimeChange: (Long) -> Unit,
+    ) {
         // To alleviate memory pressure, remove the old model before deflating the zip.
         withContext(Dispatchers.Main) {
             modelViewer.destroyModel()
@@ -450,12 +424,20 @@ class MainActivity : ComponentActivity() {
         zipFile.delete()
 
         if (gltfPath == null) {
-            setStatusText("Could not find .gltf or .glb in the zip.")
+            setStatusText(
+                "Could not find .gltf or .glb in the zip.",
+                statusToast,
+                statusText,
+            )
             return
         }
 
         if (outOfMemory != null) {
-            setStatusText("Out of memory while deflating $outOfMemory")
+            setStatusText(
+                "Out of memory while deflating $outOfMemory",
+                statusToast,
+                statusText,
+            )
             return
         }
 
@@ -477,14 +459,18 @@ class MainActivity : ComponentActivity() {
                             TAG,
                             "Could not find '$uri' in zip using prefix '$prefix' and base path '${gltfPath!!}'"
                         )
-                        setStatusText("Zip is missing $path")
+                        setStatusText(
+                            "Zip is missing $path",
+                            statusToast,
+                            statusText,
+                        )
                     }
                     pathToBufferMapping[path]
                 }
             }
-            updateRootTransform()
-            loadStartTime = System.nanoTime()
-            loadStartFence = modelViewer.engine.createFence()
+            updateRootTransform(modelViewer, automation)
+            onLoadStartTimeChange(System.nanoTime())
+            onLoadStartFenceChange(modelViewer.engine.createFence())
         }
     }
 
@@ -493,20 +479,56 @@ class MainActivity : ComponentActivity() {
         finish()
     }
 
-    fun loadModelData(message: RemoteServer.ReceivedMessage) {
+    fun loadModelData(
+        message: RemoteServer.ReceivedMessage,
+        modelViewer: ModelViewer,
+        viewerContent: ViewerContent,
+        automation: AutomationEngine,
+        statusToast: MutableState<Toast?>,
+        statusText: MutableState<String?>,
+        titleState: MutableState<String>,
+        onLoadStartFenceChange: (Fence) -> Unit,
+        onLoadStartTimeChange: (Long) -> Unit,
+    ) {
         Log.i(TAG, "Downloaded model ${message.label} (${message.buffer.capacity()} bytes)")
-        clearStatusText()
         titleState.value = message.label
         CoroutineScope(Dispatchers.IO).launch {
             when {
-                message.label.endsWith(".zip") -> loadZip(message)
-                message.label.endsWith(".hdr") -> loadHdr(message)
-                else -> loadGlb(message)
+                message.label.endsWith(".zip") -> loadZip(
+                    message = message,
+                    modelViewer = modelViewer,
+                    automation = automation,
+                    statusToast = statusToast,
+                    statusText = statusText,
+                    onLoadStartFenceChange = onLoadStartFenceChange,
+                    onLoadStartTimeChange = onLoadStartTimeChange,
+                )
+
+                message.label.endsWith(".hdr") -> loadHdr(
+                    message,
+                    modelViewer,
+                    viewerContent,
+                    statusToast,
+                    statusText,
+                )
+
+                else -> loadGlb(
+                    message,
+                    modelViewer,
+                    automation,
+                    onLoadStartFenceChange,
+                    onLoadStartTimeChange
+                )
             }
         }
     }
 
-    fun loadSettings(message: RemoteServer.ReceivedMessage) {
+    fun loadSettings(
+        message: RemoteServer.ReceivedMessage,
+        modelViewer: ModelViewer,
+        automation: AutomationEngine,
+        viewerContent: ViewerContent,
+    ) {
         val json = StandardCharsets.UTF_8.decode(message.buffer).toString()
         viewerContent.assetLights = modelViewer.asset?.lightEntities
         automation.applySettings(modelViewer.engine, json, viewerContent)
@@ -514,10 +536,10 @@ class MainActivity : ComponentActivity() {
         modelViewer.cameraFocalLength = automation.viewerOptions.cameraFocalLength
         modelViewer.cameraNear = automation.viewerOptions.cameraNear
         modelViewer.cameraFar = automation.viewerOptions.cameraFar
-        updateRootTransform()
+        updateRootTransform(modelViewer, automation)
     }
 
-    private fun updateRootTransform() {
+    private fun updateRootTransform(modelViewer: ModelViewer, automation: AutomationEngine) {
         if (automation.viewerOptions.autoScaleEnabled) {
             modelViewer.transformToUnitCube()
         } else {
@@ -525,9 +547,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    inner class FrameCallback(private val choreographer: Choreographer) :
+    inner class FrameCallback(
+        private val choreographer: Choreographer,
+        private val modelViewer: ModelViewer,
+        private val automation: AutomationEngine,
+        private val viewerContent: ViewerContent,
+        private val remoteServer: RemoteServer?,
+        private var loadStartTime: Long,
+        private var statusToast: MutableState<Toast?>,
+        private var statusText: MutableState<String?>,
+        private var titleState: MutableState<String>,
+    ) :
         Choreographer.FrameCallback {
         private val startTime = System.nanoTime()
+        private var loadStartFence: Fence? = null
+        private var latestDownload: String? = null
         override fun doFrame(frameTimeNanos: Long) {
             choreographer.postFrameCallback(this)
 
@@ -588,7 +622,7 @@ class MainActivity : ComponentActivity() {
             if (RemoteServer.isBinary(currentDownload) && currentDownload != latestDownload) {
                 latestDownload = currentDownload
                 Log.i(TAG, "Downloading $currentDownload")
-                setStatusText("Downloading $currentDownload")
+                setStatusText("Downloading $currentDownload", statusToast, statusText)
             }
 
             // Check if a new message has been fully received from the client.
@@ -598,19 +632,37 @@ class MainActivity : ComponentActivity() {
                     latestDownload = null
                 }
                 if (RemoteServer.isJson(message.label)) {
-                    loadSettings(message)
+                    loadSettings(
+                        message = message,
+                        modelViewer = modelViewer,
+                        automation = automation,
+                        viewerContent = viewerContent
+                    )
                 } else {
-                    loadModelData(message)
+                    loadModelData(
+                        message = message,
+                        modelViewer = modelViewer,
+                        viewerContent = viewerContent,
+                        automation = automation,
+                        statusToast = statusToast,
+                        statusText = statusText,
+                        titleState = titleState,
+                        onLoadStartFenceChange = { loadStartFence = it },
+                        onLoadStartTimeChange = { loadStartTime = it },
+                    )
                 }
             }
         }
     }
 
     // Just for testing purposes, this releases the current model and reloads the default model.
-    inner class DoubleTapListener : GestureDetector.SimpleOnGestureListener() {
+    inner class DoubleTapListener(
+        private val modelViewer: ModelViewer,
+        private val automation: AutomationEngine,
+    ) : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
             modelViewer.destroyModel()
-            createDefaultRenderables()
+            createDefaultRenderables(modelViewer, automation)
             return super.onDoubleTap(e)
         }
     }
@@ -634,3 +686,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+class MyLifecycleTracker(
+    private val choreographer: Choreographer,
+    private val frameScheduler: Choreographer.FrameCallback,
+    private val remoteServer: RemoteServer?
+) : DefaultLifecycleObserver {
+    override fun onResume(owner: LifecycleOwner) {
+        super.onResume(owner)
+        choreographer.postFrameCallback(frameScheduler)
+    }
+
+    override fun onPause(owner: LifecycleOwner) {
+        super.onPause(owner)
+        choreographer.removeFrameCallback(frameScheduler)
+    }
+
+    override fun onDestroy(owner: LifecycleOwner) {
+        super.onDestroy(owner)
+        choreographer.removeFrameCallback(frameScheduler)
+        remoteServer?.close()
+    }
+}
+
