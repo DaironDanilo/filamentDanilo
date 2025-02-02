@@ -18,30 +18,34 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.danilo.filamentdanilo.presentation.screens.components.FilamentSurfaceComposeView
+import org.koin.androidx.compose.koinViewModel
 
 @Composable
-fun HomeScreen() {
+fun HomeScreen(
+    homeViewModel: HomeViewModel = koinViewModel()
+) {
     val titleState = remember { mutableStateOf("https://google.github.io/filament/remote") }
+    val cameraFocalLength = homeViewModel.cameraFocalLength.collectAsStateWithLifecycle()
     Box(
         modifier = Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
-        FilamentSurfaceComposeView(titleState)
-        Column(Modifier
-            .align(Alignment.TopCenter)
-            .windowInsetsPadding(WindowInsets.statusBars)) {
+        FilamentSurfaceComposeView(titleState, cameraFocalLength.value)
+        Column(
+            Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.statusBars)
+        ) {
             if (titleState.value.isNotEmpty()) {
                 ElevatedCard(
                     elevation = CardDefaults.cardElevation(
@@ -59,10 +63,7 @@ fun HomeScreen() {
                 }
             }
         }
-        var sliderPosition by remember { mutableFloatStateOf(0f) }
-//             TODO("update this to use slider later")
-//            modelViewer.cameraFocalLength = sliderPosition
-//            updateRootTransform()
+
         Column(modifier = Modifier.align(Alignment.BottomCenter)) {
             ElevatedCard(
                 elevation = CardDefaults.cardElevation(
@@ -76,8 +77,8 @@ fun HomeScreen() {
                         .padding(16.dp)
                 ) {
                     Slider(
-                        value = sliderPosition,
-                        onValueChange = { sliderPosition = it },
+                        value = cameraFocalLength.value,
+                        onValueChange = { homeViewModel.setCameraFocalLength(it) },
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.secondary,
                             activeTrackColor = MaterialTheme.colorScheme.secondary,
@@ -86,7 +87,10 @@ fun HomeScreen() {
                         steps = 40,
                         valueRange = 50f..90f
                     )
-                    Text(text = "Camera Focal Length: $sliderPosition", fontSize = 24.sp)
+                    Text(
+                        text = "Camera Focal Length: %.2f".format(cameraFocalLength.value),
+                        fontSize = 24.sp
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
