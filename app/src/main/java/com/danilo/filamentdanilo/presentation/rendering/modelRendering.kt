@@ -79,6 +79,11 @@ class ModelRenderer(
         configureViewSettings(modelViewer.view)
     }
 
+    fun updateCameraFocalLength(focalLength: Float) {
+        modelViewer.cameraFocalLength = focalLength
+        updateRootTransform(modelViewer, automationEngine)
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun setupGestureListeners(context: Context) {
         val doubleTapListener = SceneDoubleTapListener(
