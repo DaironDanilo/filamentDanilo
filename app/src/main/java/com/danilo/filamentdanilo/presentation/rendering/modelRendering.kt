@@ -1,6 +1,7 @@
 package com.danilo.filamentdanilo.presentation.rendering
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.SurfaceView
@@ -18,22 +19,22 @@ import com.google.android.filament.utils.ModelViewer
 import com.google.android.filament.utils.RemoteServer
 import java.nio.ByteBuffer
 
-class ModelRenderer {
+class ModelRenderer(
+    private val surfaceView: SurfaceView,
+    private val modelViewer: ModelViewer = ModelViewer(surfaceView),
+    private val automationEngine: AutomationEngine = AutomationEngine(),
+    private val remoteServer: RemoteServer = RemoteServer(REMOTE_PORT),
+    private val viewerContent: ViewerContent = ViewerContent(),
+    private val choreographer: Choreographer = Choreographer.getInstance(),
+) {
 
-    @SuppressLint("ClickableViewAccessibility")
+    private val loadStartTime = 0L
     fun initSurfaceView(
-        surfaceView: SurfaceView,
         titleState: MutableState<String>,
         lifecycle: Lifecycle,
     ) {
-        val loadStartTime = 0L
         val statusToast = mutableStateOf<Toast?>(null)
         val statusText = mutableStateOf<String?>(null)
-        val remoteServer = RemoteServer(8082)
-        val choreographer = Choreographer.getInstance()
-        val modelViewer = ModelViewer(surfaceView)
-        val viewerContent = ViewerContent()
-        val automation = AutomationEngine()
         val context = surfaceView.context
 
         //        setStatusText(
@@ -41,18 +42,11 @@ class ModelRenderer {
 //            statusToast = statusToast,
 //            statusText = statusText,
 //        )
-        fun updateRootTransform(modelViewer: ModelViewer, automation: AutomationEngine) {
-            if (automation.viewerOptions.autoScaleEnabled) {
-                modelViewer.transformToUnitCube()
-            } else {
-                modelViewer.clearRootTransform()
-            }
-        }
 
         val frameScheduler = FrameCallback(
             choreographer = choreographer,
             modelViewer = modelViewer,
-            automation = automation,
+            automation = automationEngine,
             viewerContent = viewerContent,
             remoteServer = remoteServer,
             loadStartTime = loadStartTime,
@@ -63,43 +57,35 @@ class ModelRenderer {
             updateRootTransform = { mv, aut -> updateRootTransform(mv, aut) }
         )
 
-        fun readCompressedAsset(assetName: String): ByteBuffer {
-            val input = context.assets.open(assetName)
-            val bytes = ByteArray(input.available())
-            input.read(bytes)
-            return ByteBuffer.wrap(bytes)
+        viewerContent.apply {
+            view = modelViewer.view
+            sunlight = modelViewer.light
+            lightManager = modelViewer.engine.lightManager
+            scene = modelViewer.scene
+            renderer = modelViewer.renderer
         }
 
-        fun createDefaultRenderables(modelViewer: ModelViewer, automation: AutomationEngine) {
-            val buffer = context.assets.open("models/scene.gltf").use { input ->
-                val bytes = ByteArray(input.available())
-                input.read(bytes)
-                ByteBuffer.wrap(bytes)
-            }
+        setupGestureListeners(context)
+        createDefaultRenderables(modelViewer, automationEngine, context)
+        createIndirectLight(modelViewer, viewerContent, context)
 
-            modelViewer.loadModelGltfAsync(buffer) { uri -> readCompressedAsset("models/$uri") }
-            updateRootTransform(modelViewer, automation)
-        }
+        lifecycle.addObserver(
+            RenderingLifecycleTracker(
+                choreographer,
+                frameScheduler,
+                remoteServer
+            )
+        )
+        configureViewSettings(modelViewer.view)
+    }
 
-        fun createIndirectLight(modelViewer: ModelViewer, viewerContent: ViewerContent) {
-            val engine = modelViewer.engine
-            val scene = modelViewer.scene
-            val ibl = "envs/default_env"
-            readCompressedAsset("$ibl/default_env_ibl.ktx").let {
-                scene.indirectLight = KTX1Loader.createIndirectLight(engine, it)
-                scene.indirectLight!!.intensity = 30_000.0f
-                viewerContent.indirectLight = modelViewer.scene.indirectLight
-            }
-            readCompressedAsset("$ibl/default_env_skybox.ktx").let {
-                scene.skybox = KTX1Loader.createSkybox(engine, it)
-            }
-        }
-
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupGestureListeners(context: Context) {
         val doubleTapListener = SceneDoubleTapListener(
             modelViewer = modelViewer,
-            automation = automation,
+            automation = automationEngine,
             createRenderables = { mv, aut ->
-                createDefaultRenderables(mv, aut)
+                createDefaultRenderables(mv, aut, context)
             }
         )
         val singleTapListener = SceneSingleTapListener(
@@ -110,27 +96,70 @@ class ModelRenderer {
         val doubleTapDetector = GestureDetector(context, doubleTapListener)
         val singleTapDetector = GestureDetector(context, singleTapListener)
 
-        viewerContent.view = modelViewer.view
-        viewerContent.sunlight = modelViewer.light
-        viewerContent.lightManager = modelViewer.engine.lightManager
-        viewerContent.scene = modelViewer.scene
-        viewerContent.renderer = modelViewer.renderer
-
         surfaceView.setOnTouchListener { _, event ->
             modelViewer.onTouchEvent(event)
             doubleTapDetector.onTouchEvent(event)
             singleTapDetector.onTouchEvent(event)
             true
         }
+    }
 
-        createDefaultRenderables(modelViewer, automation)
-        createIndirectLight(modelViewer, viewerContent)
+    private fun updateRootTransform(modelViewer: ModelViewer, automation: AutomationEngine) {
+        if (automation.viewerOptions.autoScaleEnabled) {
+            modelViewer.transformToUnitCube()
+        } else {
+            modelViewer.clearRootTransform()
+        }
+    }
 
-        val view = modelViewer.view
-        lifecycle.addObserver(MyLifecycleTracker(choreographer, frameScheduler, remoteServer))
+    private fun createDefaultRenderables(
+        modelViewer: ModelViewer,
+        automation: AutomationEngine,
+        context: Context
+    ) {
+        val buffer = context.assets.open(DEFAULT_MODEL).use { input ->
+            val bytes = ByteArray(input.available())
+            input.read(bytes)
+            ByteBuffer.wrap(bytes)
+        }
+
+        modelViewer.loadModelGltfAsync(buffer) { uri ->
+            readCompressedAsset(
+                "models/$uri",
+                context
+            )
+        }
+        updateRootTransform(modelViewer, automation)
+    }
+
+    private fun createIndirectLight(
+        modelViewer: ModelViewer,
+        viewerContent: ViewerContent,
+        context: Context
+    ) {
+        val engine = modelViewer.engine
+        val scene = modelViewer.scene
+        readCompressedAsset("$DEFAULT_ENV/default_env_ibl.ktx", context).let {
+            scene.indirectLight = KTX1Loader.createIndirectLight(engine, it)
+            scene.indirectLight!!.intensity = 30_000.0f
+            viewerContent.indirectLight = modelViewer.scene.indirectLight
+        }
+        readCompressedAsset("$DEFAULT_ENV/default_env_skybox.ktx", context).let {
+            scene.skybox = KTX1Loader.createSkybox(engine, it)
+        }
+    }
+
+    private fun readCompressedAsset(assetName: String, context: Context): ByteBuffer {
+        val input = context.assets.open(assetName)
+        val bytes = ByteArray(input.available())
+        input.read(bytes)
+        return ByteBuffer.wrap(bytes)
+    }
+
+    private fun configureViewSettings(view: View) {
         /*
-     * Note: The settings below are overriden when connecting to the remote UI.
-     */
+         * Note: The settings below are overridden when connecting to the remote UI.
+         */
 
         // on mobile, better use lower quality color buffer
         view.renderQuality = view.renderQuality.apply {
@@ -160,5 +189,11 @@ class ModelRenderer {
         view.bloomOptions = view.bloomOptions.apply {
             enabled = true
         }
+    }
+
+    companion object {
+        const val DEFAULT_ENV = "envs/default_env"
+        const val DEFAULT_MODEL = "models/scene.gltf"
+        const val REMOTE_PORT = 8082
     }
 }

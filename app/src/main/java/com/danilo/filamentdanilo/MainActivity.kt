@@ -1,10 +1,10 @@
 package com.danilo.filamentdanilo
 
-import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.MutableState
@@ -22,7 +22,13 @@ class MainActivity : ComponentActivity() {
         const val TAG = "gltf-viewer"
     }
 
-    @SuppressLint("ClickableViewAccessibility")
+    private val onBackPressedCallback: OnBackPressedCallback =
+        object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                finish()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -30,6 +36,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             HomeScreen()
         }
+        onBackPressedDispatcher.addCallback(this, onBackPressedCallback)
     }
 
     // TODO move this function to a common place
@@ -45,10 +52,5 @@ class MainActivity : ComponentActivity() {
                 statusToast.value?.show()
             }
         }
-    }
-
-    override fun onBackPressed() {
-        super.onBackPressed()
-        finish()
     }
 }

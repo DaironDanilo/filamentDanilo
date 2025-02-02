@@ -5,7 +5,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.filament.utils.RemoteServer
 
-class MyLifecycleTracker(
+class RenderingLifecycleTracker(
     private val choreographer: Choreographer,
     private val frameScheduler: Choreographer.FrameCallback,
     private val remoteServer: RemoteServer?

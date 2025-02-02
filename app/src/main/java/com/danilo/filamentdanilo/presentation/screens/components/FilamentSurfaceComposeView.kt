@@ -16,9 +16,9 @@ fun FilamentSurfaceComposeView(titleState: MutableState<String>) {
     AndroidView(
         modifier = Modifier.fillMaxSize(), // Occupy the max size in the Compose UI tree
         factory = { context ->
-            val modelRenderer = ModelRenderer()
             SurfaceView(context).apply {
-                modelRenderer.initSurfaceView(this, titleState, lifecycle)
+                val modelRenderer = ModelRenderer(surfaceView = this)
+                modelRenderer.initSurfaceView(titleState, lifecycle)
             }
         },
         update = { _ ->
