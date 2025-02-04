@@ -3,8 +3,6 @@ package com.danilo.filamentdanilo.presentation.rendering
 import android.content.Context
 import android.util.Log
 import android.view.Choreographer
-import android.widget.Toast
-import androidx.compose.runtime.MutableState
 import com.danilo.filamentdanilo.MainActivity.Companion.TAG
 import com.google.android.filament.Fence
 import com.google.android.filament.IndirectLight
@@ -36,9 +34,8 @@ class FrameCallback(
     private val viewerContent: ViewerContent,
     private val remoteServer: RemoteServer?,
     private var loadStartTime: Long,
-    private var statusToast: MutableState<Toast?>,
-    private var statusText: MutableState<String?>,
-    private var titleState: MutableState<String>,
+    private var onToastMessageChange: (String) -> Unit,
+    private var onTitleChange: (String) -> Unit,
     private var context: Context,
     private var updateRootTransform: (ModelViewer, AutomationEngine) -> Unit,
 ) : Choreographer.FrameCallback {
@@ -50,16 +47,14 @@ class FrameCallback(
         message: RemoteServer.ReceivedMessage,
         modelViewer: ModelViewer,
         viewerContent: ViewerContent,
-        statusToast: MutableState<Toast?>,
-        statusText: MutableState<String?>,
     ) {
         withContext(Dispatchers.Main) {
             val engine = modelViewer.engine
             val equirect = HDRLoader.createTexture(engine, message.buffer)
             if (equirect == null) {
-//                    setStatusText("Could not decode HDR file.", statusToast, statusText)
+                onToastMessageChange("Could not decode HDR file.")
             } else {
-//                    setStatusText("Successfully decoded HDR file.", statusToast, statusText)
+                onToastMessageChange("Successfully decoded HDR file.")
 
                 val context = IBLPrefilterContext(engine)
                 val equirectToCubemap = IBLPrefilterContext.EquirectangularToCubemap(context)
@@ -128,8 +123,6 @@ class FrameCallback(
         message: RemoteServer.ReceivedMessage,
         modelViewer: ModelViewer,
         automation: AutomationEngine,
-        statusToast: MutableState<Toast?>,
-        statusText: MutableState<String?>,
         onLoadStartFenceChange: (Fence) -> Unit,
         onLoadStartTimeChange: (Long) -> Unit,
     ) {
@@ -184,20 +177,12 @@ class FrameCallback(
         zipFile.delete()
 
         if (gltfPath == null) {
-//                setStatusText(
-//                    "Could not find .gltf or .glb in the zip.",
-//                    statusToast,
-//                    statusText,
-//                )
+            onToastMessageChange("Could not find .gltf or .glb in the zip.")
             return
         }
 
         if (outOfMemory != null) {
-//                setStatusText(
-//                    "Out of memory while deflating $outOfMemory",
-//                    statusToast,
-//                    statusText,
-//                )
+            onToastMessageChange("Out of memory while deflating $outOfMemory")
             return
         }
 
@@ -206,7 +191,7 @@ class FrameCallback(
         // In a zip file, the gltf file might be in the same folder as resources, or in a different
         // folder. It is crucial to test against both of these cases. In any case, the resource
         // paths are all specified relative to the location of the gltf file.
-        var prefix = URI(gltfPath!!).resolve(".")
+        val prefix = URI(gltfPath!!).resolve(".")
 
         withContext(Dispatchers.Main) {
             if (gltfPath!!.endsWith(".glb")) {
@@ -219,11 +204,7 @@ class FrameCallback(
                             TAG,
                             "Could not find '$uri' in zip using prefix '$prefix' and base path '${gltfPath!!}'"
                         )
-//                            setStatusText(
-//                                "Zip is missing $path",
-//                                statusToast,
-//                                statusText,
-//                            )
+                        onToastMessageChange("Zip is missing $path")
                     }
                     pathToBufferMapping[path]
                 }
@@ -239,22 +220,18 @@ class FrameCallback(
         modelViewer: ModelViewer,
         viewerContent: ViewerContent,
         automation: AutomationEngine,
-        statusToast: MutableState<Toast?>,
-        statusText: MutableState<String?>,
-        titleState: MutableState<String>,
+        onTitleChange: (String) -> Unit,
         onLoadStartFenceChange: (Fence) -> Unit,
         onLoadStartTimeChange: (Long) -> Unit,
     ) {
         Log.i(TAG, "Downloaded model ${message.label} (${message.buffer.capacity()} bytes)")
-        titleState.value = message.label
+        onTitleChange(message.label)
         CoroutineScope(Dispatchers.IO).launch {
             when {
                 message.label.endsWith(".zip") -> loadZip(
                     message = message,
                     modelViewer = modelViewer,
                     automation = automation,
-                    statusToast = statusToast,
-                    statusText = statusText,
                     onLoadStartFenceChange = onLoadStartFenceChange,
                     onLoadStartTimeChange = onLoadStartTimeChange,
                 )
@@ -263,8 +240,6 @@ class FrameCallback(
                     message,
                     modelViewer,
                     viewerContent,
-                    statusToast,
-                    statusText,
                 )
 
                 else -> loadGlb(
@@ -338,7 +313,7 @@ class FrameCallback(
         if (RemoteServer.isBinary(currentDownload) && currentDownload != latestDownload) {
             latestDownload = currentDownload
             Log.i(TAG, "Downloading $currentDownload")
-//                setStatusText("Downloading $currentDownload", statusToast, statusText)
+            onToastMessageChange("Downloading $currentDownload")
         }
 
         // Check if a new message has been fully received from the client.
@@ -360,9 +335,7 @@ class FrameCallback(
                     modelViewer = modelViewer,
                     viewerContent = viewerContent,
                     automation = automation,
-                    statusToast = statusToast,
-                    statusText = statusText,
-                    titleState = titleState,
+                    onTitleChange = onTitleChange,
                     onLoadStartFenceChange = { loadStartFence = it },
                     onLoadStartTimeChange = { loadStartTime = it },
                 )

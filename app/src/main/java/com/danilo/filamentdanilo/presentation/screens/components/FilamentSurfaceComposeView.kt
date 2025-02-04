@@ -3,7 +3,6 @@ package com.danilo.filamentdanilo.presentation.screens.components
 import android.view.SurfaceView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -11,7 +10,8 @@ import com.danilo.filamentdanilo.presentation.rendering.ModelRenderer
 
 @Composable
 fun FilamentSurfaceComposeView(
-    titleState: MutableState<String>,
+    onTitleChange: (String) -> Unit,
+    onToastMessageChange: (String) -> Unit,
     cameraFocalLength: Float,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -21,7 +21,11 @@ fun FilamentSurfaceComposeView(
         factory = { context ->
             SurfaceView(context).apply {
                 val modelRenderer = ModelRenderer(surfaceView = this)
-                modelRenderer.initSurfaceView(titleState, lifecycle)
+                modelRenderer.initSurfaceView(
+                    onTitleChange = onTitleChange,
+                    onToastMessageChange = onToastMessageChange,
+                    lifecycle = lifecycle
+                )
                 this.tag = modelRenderer
             }
         },

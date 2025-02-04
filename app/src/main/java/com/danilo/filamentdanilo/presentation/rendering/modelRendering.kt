@@ -5,9 +5,6 @@ import android.content.Context
 import android.view.Choreographer
 import android.view.GestureDetector
 import android.view.SurfaceView
-import android.widget.Toast
-import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
 import com.danilo.filamentdanilo.presentation.interaction.SceneDoubleTapListener
 import com.danilo.filamentdanilo.presentation.interaction.SceneSingleTapListener
@@ -30,18 +27,13 @@ class ModelRenderer(
 
     private val loadStartTime = 0L
     fun initSurfaceView(
-        titleState: MutableState<String>,
+        onTitleChange: (String) -> Unit,
+        onToastMessageChange: (String) -> Unit,
         lifecycle: Lifecycle,
     ) {
-        val statusToast = mutableStateOf<Toast?>(null)
-        val statusText = mutableStateOf<String?>(null)
         val context = surfaceView.context
 
-        //        setStatusText(
-//            text = "To load a new model, go to the above URL on your host machine.",
-//            statusToast = statusToast,
-//            statusText = statusText,
-//        )
+        onToastMessageChange("To load a new model, go to the above URL on your host machine.")
 
         val frameScheduler = FrameCallback(
             choreographer = choreographer,
@@ -50,9 +42,8 @@ class ModelRenderer(
             viewerContent = viewerContent,
             remoteServer = remoteServer,
             loadStartTime = loadStartTime,
-            statusToast = statusToast,
-            statusText = statusText,
-            titleState = titleState,
+            onToastMessageChange = onToastMessageChange,
+            onTitleChange = onTitleChange,
             context = context,
             updateRootTransform = { mv, aut -> updateRootTransform(mv, aut) }
         )
@@ -65,7 +56,7 @@ class ModelRenderer(
             renderer = modelViewer.renderer
         }
 
-        setupGestureListeners(context)
+        setupGestureListeners(context, onTitleChange)
         createDefaultRenderables(modelViewer, automationEngine, context)
         createIndirectLight(modelViewer, viewerContent, context)
 
@@ -85,13 +76,17 @@ class ModelRenderer(
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun setupGestureListeners(context: Context) {
+    private fun setupGestureListeners(
+        context: Context,
+        onTitleChange: (String) -> Unit,
+    ) {
         val doubleTapListener = SceneDoubleTapListener(
             modelViewer = modelViewer,
             automation = automationEngine,
             createRenderables = { mv, aut ->
                 createDefaultRenderables(mv, aut, context)
-            }
+            },
+            onTitleChange = onTitleChange,
         )
         val singleTapListener = SceneSingleTapListener(
             modelViewer = modelViewer,
