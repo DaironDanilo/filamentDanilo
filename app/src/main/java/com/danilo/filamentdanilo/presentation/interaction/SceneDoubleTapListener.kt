@@ -10,10 +10,12 @@ class SceneDoubleTapListener(
     private val modelViewer: ModelViewer,
     private val automation: AutomationEngine,
     private val createRenderables: (ModelViewer, AutomationEngine) -> Unit,
+    private val onTitleChange: (String) -> Unit,
 ) : GestureDetector.SimpleOnGestureListener() {
     override fun onDoubleTap(e: MotionEvent): Boolean {
         modelViewer.destroyModel()
         createRenderables(modelViewer, automation)
+        onTitleChange("https://google.github.io/filament/remote")
         return super.onDoubleTap(e)
     }
 }
